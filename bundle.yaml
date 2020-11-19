@@ -1,5 +1,0 @@
-bundle: kubernetes
-applications:
-  mssql:
-    charm: ./
-    scale: 1

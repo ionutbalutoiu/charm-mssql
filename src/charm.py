@@ -1,187 +1,201 @@
 #!/usr/bin/env python3
 
-import sys
-sys.path.append('lib')
+import logging
+import random
+import string
+import math
+import re
 
 from base64 import b64encode
-from ops.charm import CharmBase, CharmEvents
-from ops.framework import EventSource, EventBase, StoredState
+
+from ops.charm import CharmBase
 from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus
 from ops.main import main
+from charmhelpers.core.hookenv import (
+    leader_get,
+    leader_set,
+)
 
-import logging
-import subprocess
+from interface_mssql import MssqlDBProvides
 
-import yaml
-
-logger = logging.getLogger()
-
-
-
-class MSSQLReadyEvent(EventBase):
-    pass
-
-
-class MSSQLCharmEvents(CharmEvents):
-    mssql_ready = EventSource(MSSQLReadyEvent)
+logger = logging.getLogger(__name__)
 
 
 class MSSQLCharm(CharmBase):
-    on = MSSQLCharmEvents()
-    state = StoredState()
 
-    def __init__(self, parent, key):
-        super().__init__(parent, key)
+    UNIT_ACTIVE_STATUS = ActiveStatus('Unit is ready')
+    APPLICATION_ACTIVE_STATUS = ActiveStatus('MSSQL pod ready')
+    MSSQL_PRODUCT_IDS = [
+        'evaluation',
+        'developer',
+        'express',
+        'web',
+        'standard',
+        'enterprise'
+    ]
 
-        self.framework.observe(self.on.install, self.set_pod_spec)
-        # self.framework.observe(self.on.start, self)
-        self.framework.observe(self.on.stop, self)
-        self.framework.observe(self.on.config_changed, self)
-        self.framework.observe(self.on.db_relation_joined, self)
-        self.framework.observe(self.on.db_relation_changed, self)
-        self.framework.observe(self.on.mssql_ready, self)
-        self.state.set_default(spec=None)
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.mssql_provider = MssqlDBProvides(self, 'db')
 
-    def on_stop(self, event):
-        log('Ran on_stop')
+        self.framework.observe(self.on.config_changed, self._on_config_changed)
+        self.framework.observe(self.on.start, self._on_config_changed)
+        self.framework.observe(self.on.leader_elected, self._on_config_changed)
+        self.framework.observe(self.on.upgrade_charm, self._on_config_changed)
 
-    def on_config_changed(self, event):
-        log('Ran on_config_changed hook')
-        self.set_pod_spec(event)
+    def _on_config_changed(self, _):
+        self._configure_pod()
 
-    def on_mssql_ready(self, event):
-        pass
+    def _validate_product_id(self):
+        product_id = self.model.config['product-id']
+        if product_id.lower() in self.MSSQL_PRODUCT_IDS:
+            return True
 
-    def on_db_relation_joined(self, event):
-        self._state['on_db_relation_joined'].append(type(event))
-        self._state['observed_event_types'].append(type(event))
-        self._state['db_relation_joined_data'] = event.snapshot()
-        self._write_state()
+        logger.warning("The product id is not a standard MSSQL product id. "
+                       "Checking if it's a product key.")
+        if not self._is_product_key(product_id):
+            logger.warning("Product id %s is not a valid product key",
+                           product_id)
+            return False
 
-    def on_db_relation_changed(self, event):
-        if not self.state.ready:
-            event.defer()
-            return
+        return True
 
-    def set_pod_spec(self, event):
-        if not self.model.unit.is_leader():
-            print('Not a leader, skipping set_pod_spec')
-            self.model.unit.status = ActiveStatus()
-            return
+    def _validate_config(self):
+        """Validates the charm config
 
-        self.model.unit.status = MaintenanceStatus('Setting pod spec')
+        :returns: boolean representing whether the config is valid or not.
+        """
+        logger.info('Validating charm config')
 
-        log('Adding secret to container_config', level='INFO')
-        config = self.framework.model.config
-        container_config= self.sanitized_container_config()
-        container_config['mssql-secret'] = {'secret' : {'name': 'mssql'}}
+        config = self.model.config
+        required = ['image', 'product-id']
+        missing = []
+        for name in required:
+            if not config.get(name):
+                missing.append(name)
+        if missing:
+            msg = 'Missing configuration: {}'.format(missing)
+            logger.warning(msg)
+            self.unit.status = BlockedStatus(msg)
+            return False
 
-        log('Validating ports syntax', level='INFO')
-        ports = yaml.safe_load(self.framework.model.config["ports"])
-        if not isinstance(ports, list):
-            self.model.unit.status = \
-                BlockedStatus("ports is not a list of YAMLs")
-            return
+        if not self.model.config['accept-eula']:
+            msg = 'The MSSQL EULA is not accepted'
+            logger.warning(msg)
+            self.unit.status = BlockedStatus(msg)
+            return False
 
-        log('Validating password', level='INFO')
-        check_password = self.framework.model.config["sa_password"]
-        if len(check_password) < 8 \
-                or len(check_password) > 20 \
-                or not any(char.isupper() for char in check_password) \
-                or not any(char.isdigit() for char in check_password):
-            self.model.unit.status = \
-                BlockedStatus("sa_password does not respect criteria")
-            return
-        sa_password = b64encode((check_password).
-                                encode('utf-8')).decode('utf-8')
+        if not self._validate_product_id():
+            msg = 'Invalid MSSQL product id'
+            logger.warning(msg)
+            self.unit.status = BlockedStatus(msg)
+            return False
 
-        log('Setting pod spec', level='INFO')
-        self.framework.model.pod.set_spec({
+        return True
+
+    def _build_pod_spec(self):
+        return {
             'version': 3,
             'containers': [{
-                'name': self.framework.model.app.name,
-                'image': config["image"],
-                'ports': ports,
-                'envConfig': container_config,
+                'name': self.app.name,
+                'image': self.model.config['image'],
+                'ports': [
+                    {
+                        'name': 'mssql',
+                        'containerPort': 1433,
+                        'protocol': 'TCP'
+                    }
+                ],
+                'envConfig': {
+                    'MSSQL_PID': self.model.config['product-id'],
+                    'ACCEPT_EULA': self._accept_eula,
+                    'mssql-secret': {
+                        'secret': {
+                            'name': 'mssql'
+                        }
+                    }
+                },
+                'kubernetes': {
+                    'readinessProbe': {
+                        'tcpSocket': {
+                            'port': 1433
+                        },
+                        'initialDelaySeconds': 3,
+                        'periodSeconds': 3
+                    }
                 }
-            ],
+            }]
+        }
+
+    def _build_pod_resources(self):
+        sa_pass = b64encode(
+            self._sa_password().encode('UTF-8')).decode('UTF-8')
+        return {
             'kubernetesResources': {
                 'secrets': [
                     {
                         'name': 'mssql',
                         'type': 'Opaque',
                         'data': {
-                            'SA_PASSWORD': sa_password,
+                            'SA_PASSWORD': sa_pass,
                         }
                     }
                 ]
-            },
-            'serviceAccount': {
-                'roles': [{
-                    'global': True,
-                    'rules': [
-                        {
-                            'apiGroups': ['apps'],
-                            'resources': ['statefulsets', 'deployments'],
-                            'verbs': ['*'],
-                        },
-                        {
-                            'apiGroups': [''],
-                            'resources': ['pods', 'pods/exec'],
-                            'verbs': ['create', 'get', 'list', 'watch',
-                                      'update',
-                                      'patch'],
-                        },
-                        {
-                            'apiGroups': [''],
-                            'resources': ['configmaps'],
-                            'verbs': ['get', 'watch', 'list'],
-                        },
-                        {
-                            'apiGroups': [''],
-                            'resources': ['persistentvolumeclaims'],
-                            'verbs': ['create', 'delete'],
-                        },
-                    ],
-                }]
-            },
-            # "restartPolicy": 'Always',
-            # "terminationGracePeriodSeconds": 10,
-        })
-        self.model.unit.status = ActiveStatus()
-        return
+            }
+        }
 
-    def sanitized_container_config(self):
-        """Uninterpolated container config without secrets"""
-        config = self.framework.model.config
-        if config["container_config"].strip() == "":
-            container_config = {}
-        else:
-            container_config = \
-                yaml.safe_load(self.framework.model.config["container_config"])
-            if not isinstance(container_config, dict):
-                self.framework.model.unit.status = \
-                    BlockedStatus("container_config is not a YAML mapping")
-                return None
-        return container_config
+    def _configure_pod(self):
+        """Setup a new Microsoft SQL Server pod specification"""
+        if not self.unit.is_leader():
+            self.unit.status = self.UNIT_ACTIVE_STATUS
+            return
 
+        if not self._validate_config():
+            logger.warning('Charm config is not valid')
+            return
 
-def log(message, level=None):
-    """Write a message to the juju log"""
-    command = ['juju-log']
-    if level:
-        command += ['-l', level]
-    if not isinstance(message, str):
-        message = repr(message)
+        logger.info("Setting pod spec")
+        self.unit.status = MaintenanceStatus('Setting pod spec')
 
-    # https://elixir.bootlin.com/linux/latest/source/include/uapi/linux/binfmts.h
-    # PAGE_SIZE * 32 = 4096 * 32
-    MAX_ARG_STRLEN = 131072
-    command += [message[:MAX_ARG_STRLEN]]
-    # Missing juju-log should not cause failures in unit tests
-    # Send log output to stderr
-    subprocess.call(command)
+        pod_spec = self._build_pod_spec()
+        pod_resources = self._build_pod_resources()
+        self.model.pod.set_spec(pod_spec, pod_resources)
+
+        self.app.status = self.APPLICATION_ACTIVE_STATUS
+        self.unit.status = self.UNIT_ACTIVE_STATUS
+
+    def _sa_password(self, length=32):
+        sa_pass = leader_get('sa_password')
+        if sa_pass:
+            return sa_pass
+
+        random_len = math.ceil(length/4)
+        lower = ''.join(random.choice(string.ascii_lowercase)
+                        for i in range(random_len))
+        upper = ''.join(random.choice(string.ascii_uppercase)
+                        for i in range(random_len))
+        digits = ''.join(random.choice(string.digits)
+                         for i in range(random_len))
+        special = ''.join(random.choice(string.punctuation)
+                          for i in range(random_len))
+
+        sa_pass = lower + upper + digits + special
+        leader_set(sa_password=sa_pass)
+
+        return sa_pass
+
+    def _is_product_key(self, key):
+        regex = re.compile(r"^([A-Z]|[0-9]){5}(-([A-Z]|[0-9]){5}){4}$")
+        if regex.match(key.upper()):
+            return True
+        return False
+
+    @property
+    def _accept_eula(self):
+        if self.model.config['accept-eula']:
+            return 'Y'
+        return 'N'
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main(MSSQLCharm)

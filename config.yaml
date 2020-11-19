@@ -1,35 +1,23 @@
 options:
-  database:
-    type: string
-    description: 'The database name.'
-    default: 'mssql'
   image:
     type: string
-    name: mssql
-    description: The docker image to install.
     default: mcr.microsoft.com/mssql/server:2019-latest
-  ports:
-      type: string
-      description: |
-        List of YAML formatted map of ports to expose. To add more than one,
-        simply follow the format [{map1},{map2}]
-      default: "[{'name': 'mssql',
-                'containerPort': 1433,
-                'protocol': 'TCP'}]"
-  container_config:
+    description: The container image to use.
+  accept-eula:
+    type: boolean
+    default: False
+    description: Confirms acceptance of the End-User Licensing Agreement.
+  product-id:
     type: string
-    default: "{'MSSQL_PID': 'developer',
-              'ACCEPT_EULA': 'Y',
-              }"
-  container_secrets:
-      type: string
-      description: |
-          YAML formatted map of secrets. Works just like container_config.
-      default: ""
-  sa_password:
-      type: string
-      description: |
-        Complex password for the system administrator (SA) of the database.
-        It requires 8+ characters, at least one number, one capital letter,
-        and a special character.
-      default: 'MyC0m9l&xP@ssw0rd'
+    default: Developer
+    description: |
+      The SQL Server edition or product key. Valid options are:
+        * Evaluation
+        * Developer
+        * Express
+        * Web
+        * Standard
+        * Enterprise
+        * A product key
+      If specifying a product key, it must be in the form of
+      #####-#####-#####-#####-#####, where '#' is a number or a letter.

@@ -1,4 +1,8 @@
-.idea
-build
-*.charm
+.stestr/
+.tox/
+build/
+venv/
 __pycache__
+*.py[cod]
+*.charm
+.idea

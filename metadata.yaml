@@ -19,6 +19,9 @@ deployment:
 provides:
   db:
     interface: mssql
+peers:
+  peers:
+    interface: mssql-peer
 subordinate: false
 storage: # https://jaas.ai/docs/persistent-storage-and-kubernetes
   database:

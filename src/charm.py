@@ -11,12 +11,9 @@ from base64 import b64encode
 from ops.charm import CharmBase
 from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus
 from ops.main import main
-from charmhelpers.core.hookenv import (
-    leader_get,
-    leader_set,
-)
 
 from interface_mssql import MssqlDBProvides
+from interface_mssql_peer import MssqlPeer
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +33,7 @@ class MSSQLCharm(CharmBase):
 
     def __init__(self, *args):
         super().__init__(*args)
+        self.mssql_peer = MssqlPeer(self, 'peers')
         self.mssql_provider = MssqlDBProvides(self, 'db')
 
         self.framework.observe(self.on.config_changed, self._on_config_changed)
@@ -165,7 +163,7 @@ class MSSQLCharm(CharmBase):
         self.unit.status = self.UNIT_ACTIVE_STATUS
 
     def _sa_password(self, length=32):
-        sa_pass = leader_get('sa_password')
+        sa_pass = self.mssql_peer.get_peers_rel_data('sa_password')
         if sa_pass:
             return sa_pass
 
@@ -180,7 +178,7 @@ class MSSQLCharm(CharmBase):
                           for i in range(random_len))
 
         sa_pass = lower + upper + digits + special
-        leader_set(sa_password=sa_pass)
+        self.mssql_peer.set_peers_rel_data(sa_password=sa_pass)
 
         return sa_pass
 

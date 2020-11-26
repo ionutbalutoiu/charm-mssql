@@ -4,9 +4,9 @@ import logging
 
 from ops.framework import Object
 from charmhelpers.core import host
-from charmhelpers.core.hookenv import leader_get
 
 from mssql_db_client import MSSQLDatabaseClient
+from interface_mssql_peer import MssqlPeer
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +18,7 @@ class MssqlDBProvides(Object):
         self.db_rel_name = relation_name
         self.app = self.model.app
         self.unit = self.model.unit
+        self.mssql_peer = MssqlPeer(self, 'peers')
         self.framework.observe(
             charm.on[relation_name].relation_changed,
             self.on_changed)
@@ -106,5 +107,5 @@ class MssqlDBProvides(Object):
     def mssql_db_client(self, db_host):
         return MSSQLDatabaseClient(
             user='SA',
-            password=leader_get('sa_password'),
+            password=self.mssql_peer.get_peers_rel_data('sa_password'),
             host=db_host)

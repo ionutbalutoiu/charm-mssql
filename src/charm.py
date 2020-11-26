@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import logging
-import random
+import secrets
 import string
 import math
 import re
@@ -168,13 +168,13 @@ class MSSQLCharm(CharmBase):
             return sa_pass
 
         random_len = math.ceil(length/4)
-        lower = ''.join(random.choice(string.ascii_lowercase)
+        lower = ''.join(secrets.choice(string.ascii_lowercase)
                         for i in range(random_len))
-        upper = ''.join(random.choice(string.ascii_uppercase)
+        upper = ''.join(secrets.choice(string.ascii_uppercase)
                         for i in range(random_len))
-        digits = ''.join(random.choice(string.digits)
+        digits = ''.join(secrets.choice(string.digits)
                          for i in range(random_len))
-        special = ''.join(random.choice(string.punctuation)
+        special = ''.join(secrets.choice(string.punctuation)
                           for i in range(random_len))
 
         sa_pass = lower + upper + digits + special

@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """
 Helpers for the Microsoft SQL Server charm.
 """

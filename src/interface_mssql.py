@@ -1,4 +1,6 @@
-#!/usr/bin/env python3
+"""
+Implementation of the MSSQL charm database relation.
+"""
 
 import logging
 

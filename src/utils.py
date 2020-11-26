@@ -1,4 +1,6 @@
-#!/usr/bin/env python3
+"""
+Utilities needed for the charm implementation
+"""
 
 import logging
 import functools

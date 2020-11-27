@@ -48,10 +48,5 @@ Instructions to install it on Ubuntu are available [here](https://docs.microsoft
 
 An example of command to connect to the database would be:
 ```
-sqlcmd -S 192.168.1.75,32038 -U SA -P "<SA_PASSWORD>"
-```
-
-To find out the `SA` password, run the following command:
-```
-juju exec --operator --unit mssql/leader leader-get
+sqlcmd -S 192.168.1.75,32038 -U "<DB_USER_NAME>" -P "<DB_USER_PASSWORD>"
 ```

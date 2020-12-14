@@ -1,14 +1,15 @@
 import unittest
 
+from unittest import mock
+
 from ops.testing import Harness
 from ops.charm import CharmBase
 
-from unittest import mock
+from interface_mssql_provider import MssqlDBProvider
+from interface_mssql_peer import MssqlPeer
 
-from interface_mssql import MssqlDBProvides
 
-
-class TestInterfaceMssql(unittest.TestCase):
+class TestInterfaceMssqlDBProvider(unittest.TestCase):
 
     def setUp(self):
         self.harness = Harness(CharmBase, meta='''
@@ -16,11 +17,14 @@ class TestInterfaceMssql(unittest.TestCase):
             provides:
               db:
                 interface: mssql
+            peers:
+              peers:
+                interface: mssql-peer
         ''')
         self.addCleanup(self.harness.cleanup)
 
-    @mock.patch.object(MssqlDBProvides, 'mssql_db_client')
-    @mock.patch.object(MssqlDBProvides, 'relation_bind_address')
+    @mock.patch.object(MssqlDBProvider, 'mssql_db_client')
+    @mock.patch.object(MssqlDBProvider, 'relation_bind_address')
     @mock.patch('charmhelpers.core.host.pwgen')
     def test_on_changed(self,
                         _pwgen,
@@ -29,9 +33,12 @@ class TestInterfaceMssql(unittest.TestCase):
         _pwgen.return_value = 'db-user-password'
         _relation_bind_address.return_value = '192.168.1.1'
 
-        self.harness.begin()
         self.harness.set_leader()
-        self.mssql_provider = MssqlDBProvides(self.harness.charm, 'db')
+        self.harness.begin()
+        self.harness.charm.mssql_peer = MssqlPeer(
+            self.harness.charm, 'peers')
+        self.harness.charm.mssql_provider = MssqlDBProvider(
+            self.harness.charm, 'db')
         rel_id = self.harness.add_relation('db', 'wordpress')
         self.harness.add_relation_unit(rel_id, 'wordpress/0')
         self.harness.update_relation_data(

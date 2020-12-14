@@ -12,7 +12,7 @@ from ops.charm import CharmBase
 from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus
 from ops.main import main
 
-from interface_mssql import MssqlDBProvides
+from interface_mssql_provider import MssqlDBProvider
 from interface_mssql_peer import MssqlPeer
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ class MSSQLCharm(CharmBase):
     def __init__(self, *args):
         super().__init__(*args)
         self.mssql_peer = MssqlPeer(self, 'peers')
-        self.mssql_provider = MssqlDBProvides(self, 'db')
+        self.mssql_provider = MssqlDBProvider(self, 'db')
 
         self.framework.observe(self.on.config_changed, self._on_config_changed)
         self.framework.observe(self.on.start, self._on_config_changed)

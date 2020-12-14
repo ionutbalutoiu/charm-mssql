@@ -1,5 +1,5 @@
 """
-Implementation of the MSSQL charm database relation.
+Implementation of the MSSQL charm database provider interface.
 """
 
 import logging
@@ -8,19 +8,17 @@ from ops.framework import Object
 from charmhelpers.core import host
 
 from mssql_db_client import MSSQLDatabaseClient
-from interface_mssql_peer import MssqlPeer
 
 logger = logging.getLogger(__name__)
 
 
-class MssqlDBProvides(Object):
+class MssqlDBProvider(Object):
 
     def __init__(self, charm, relation_name):
         super().__init__(charm, relation_name)
-        self.db_rel_name = relation_name
         self.app = self.model.app
         self.unit = self.model.unit
-        self.mssql_peer = MssqlPeer(self, 'peers')
+        self.mssql_peer = charm.mssql_peer
         self.framework.observe(
             charm.on[relation_name].relation_changed,
             self.on_changed)
